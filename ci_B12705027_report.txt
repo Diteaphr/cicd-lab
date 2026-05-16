@@ -1,0 +1,128 @@
+\section*{CI Pipeline 實作報告：B12705027}
+
+\subsection*{一、Pipeline 主要內容}
+本次新增的 GitHub Actions workflow 檔案為：
+\begin{verbatim}
+.github/workflows/ci_B12705027.yaml
+\end{verbatim}
+
+主要內容如下：
+\begin{verbatim}
+name: CI B12705027
+
+on:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: Typecheck, Format, and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Prettier check
+        run: npm run format:check
+
+      - name: Run tests and create report files
+        run: |
+          mkdir -p reports
+          set -o pipefail
+          npm test -- --reporter=default --reporter=junit --outputFile.junit=reports/vitest-junit.xml 2>&1 | tee reports/vitest-output.txt
+
+      - name: Show test results in GitHub Actions summary
+        if: always()
+        run: |
+          echo "## Vitest Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f reports/vitest-output.txt ]; then
+            cat reports/vitest-output.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Vitest did not produce an output file." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test result artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results
+          path: reports/
+          if-no-files-found: error
+\end{verbatim}
+
+\subsection*{二、設計邏輯}
+\begin{itemize}
+  \item \textbf{自動觸發：}使用 \verb|on: push|，任何 branch push 後都會自動執行 pipeline。
+  \item \textbf{環境建立：}先使用 \verb|actions/checkout| 取得程式碼，再使用 \verb|actions/setup-node| 安裝 Node.js 22，並啟用 npm cache 以加快後續執行速度。
+  \item \textbf{依賴安裝：}使用 \verb|npm ci|，確保 CI 環境依照 \verb|package-lock.json| 安裝固定版本套件。
+  \item \textbf{TypeScript typecheck：}執行 \verb|npm run typecheck|，對應 \verb|tsc --noEmit|，只檢查型別不產生編譯輸出。
+  \item \textbf{Prettier check：}執行 \verb|npm run format:check|，確認專案格式符合 Prettier 規則。
+  \item \textbf{Test：}執行 \verb|npm test|，並讓 Vitest 同時輸出 console 結果與 JUnit XML 報告。
+\end{itemize}
+
+\subsection*{三、錯誤阻斷機制}
+GitHub Actions 中每一個 \verb|run| step 預設只要指令回傳非零 exit code，該 step 就會失敗，job 也會標示為 failed。
+因此 \verb|npm run typecheck|、\verb|npm run format:check|、\verb|npm test| 任一項失敗時，整個 pipeline 都會失敗。
+
+測試步驟中使用：
+\begin{verbatim}
+set -o pipefail
+\end{verbatim}
+這可避免 \verb|tee| 掩蓋前面 \verb|npm test| 的失敗狀態，確保測試失敗仍會正確讓 pipeline failed。
+
+\subsection*{四、測試結果呈現方式}
+測試結果使用兩種方式呈現：
+\begin{itemize}
+  \item \textbf{GitHub Actions Summary：}將 \verb|reports/vitest-output.txt| 寫入 \verb|$GITHUB_STEP_SUMMARY|，因此可在 Actions 執行結果頁面直接看到 Vitest 測試輸出。
+  \item \textbf{Artifacts：}上傳 \verb|reports/vitest-junit.xml| 與 \verb|reports/vitest-output.txt|，方便下載保存或進一步分析。
+\end{itemize}
+
+\subsection*{五、成功執行結果截圖}
+請在 GitHub Actions 成功執行後，於報告或作業平台附上以下截圖：
+\begin{itemize}
+  \item Actions workflow list 中 \verb|CI B12705027| 顯示成功的畫面。
+  \item 進入該次 workflow run 後，\verb|TypeScript typecheck|、\verb|Prettier check|、\verb|Run tests and create report files| 均為成功的畫面。
+  \item Summary 區塊中出現 \verb|Vitest Results| 測試結果的畫面。
+\end{itemize}
+
+\subsection*{六、失敗案例說明}
+可故意製造以下任一錯誤以驗證 pipeline failed：
+\begin{enumerate}
+  \item \textbf{型別錯誤：}例如在 \verb|src/app.ts| 中加入 \verb|const broken: string = 123;|，push 後 \verb|TypeScript typecheck| 會失敗。
+  \item \textbf{格式錯誤：}故意讓程式碼不符合 Prettier 格式，push 後 \verb|Prettier check| 會失敗。
+  \item \textbf{測試錯誤：}例如將 \verb|test/app.test.ts| 中 \verb|expect(response.statusCode).toBe(200)| 改成 \verb|expect(response.statusCode).toBe(500)|，push 後測試步驟會失敗。
+\end{enumerate}
+
+失敗截圖應包含：
+\begin{itemize}
+  \item GitHub Actions workflow run 顯示 failed 的畫面。
+  \item 失敗 step 展開後的錯誤訊息。
+  \item 修正後重新 push 並成功通過的畫面。
+\end{itemize}
+
+\subsection*{七、修正方式}
+若因型別錯誤失敗，移除錯誤型別指定或改成正確型別；若因格式錯誤失敗，執行：
+\begin{verbatim}
+npm run format
+\end{verbatim}
+若因測試失敗，將測試預期值或程式邏輯修正回正確行為。修正後再次 push，GitHub Actions 會重新執行並應顯示 successful。

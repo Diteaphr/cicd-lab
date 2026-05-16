@@ -1,0 +1,60 @@
+name: CI B12705027
+
+on:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: Typecheck, Format, and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Prettier check
+        run: npm run format:check
+
+      - name: Run tests and create report files
+        run: |
+          mkdir -p reports
+          set -o pipefail
+          npm test -- --reporter=default --reporter=junit --outputFile.junit=reports/vitest-junit.xml 2>&1 | tee reports/vitest-output.txt
+
+      - name: Show test results in GitHub Actions summary
+        if: always()
+        run: |
+          echo "## Vitest Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f reports/vitest-output.txt ]; then
+            cat reports/vitest-output.txt >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Vitest did not produce an output file." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test result artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results
+          path: reports/
+          if-no-files-found: error
